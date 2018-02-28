@@ -1,11 +1,57 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h> //for spinlock
+#include <sys/syscall.h> //for SYS_gettid
+#include <inttypes.h> //for PRId64
+#include <stdarg.h> //for va_start
 
 FILE *logfile;
+pthread_spinlock_t spinlock;
+char banner[4096];
+
+#define TRACE_FILE_LEN 18
+#define TRACE_FILE "/trace_stackfs.log"
+
+int64_t print_timer(void)
+{
+    struct timespec tms;
+
+    if (clock_gettime(CLOCK_REALTIME, &tms)) {
+        printf("ERROR\n");
+        return 0;
+    }
+    int64_t micros = tms.tv_sec * 1000000;
+
+    micros += tms.tv_nsec/1000;
+    if (tms.tv_nsec % 1000 >= 500)
+        ++micros;
+    return micros;
+}
+
+/* called with file lock */
+int print_banner(void)
+{
+    int len;
+    int64_t time;
+    int pid;
+    unsigned long tid;
+
+    banner[0] = '\0';
+    time = print_timer();
+    pid = getpid();
+    tid = syscall(SYS_gettid);
+    if (time == 0)
+        return -1;
+    len = sprintf(banner, "Time : %"PRId64" Pid : %d Tid : %lu ",
+                            time, pid, tid);
+    (void) len;
+    fputs(banner, logfile);
+    return 0;
+}
 
 int log_open(char *statsDir_relative)
 {
-	char *statsDir = realpath(statsDir_relative, NULL)
+	char *statsDir = realpath(statsDir_relative, NULL);
     char *trace_path = NULL;
 
     if (statsDir) {
