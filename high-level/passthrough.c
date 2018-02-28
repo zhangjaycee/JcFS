@@ -22,6 +22,7 @@
  * \include passthrough.c
  */
 
+#define JC_LOG
 
 #define FUSE_USE_VERSION 31
 
@@ -45,6 +46,10 @@
 #include <sys/time.h>
 #ifdef HAVE_SETXATTR
 #include <sys/xattr.h>
+#endif
+
+#ifdef JC_LOG
+#include "log.h"
 #endif
 
 static void *xmp_init(struct fuse_conn_info *conn,

@@ -4,6 +4,10 @@
 #include <sys/syscall.h> //for SYS_gettid
 #include <inttypes.h> //for PRId64
 #include <stdarg.h> //for va_start
+#include <unistd.h> //for syscall
+#include <string.h>
+
+
 
 FILE *logfile;
 pthread_spinlock_t spinlock;
@@ -66,7 +70,7 @@ int log_open(char *statsDir_relative)
         strncpy(trace_path, TRACE_FILE + 1, TRACE_FILE_LEN-1);
     }
     printf("Trace file location : %s\n", trace_path);
-    logfile = fopen(trace_path, "w");
+    logfile = fopen(trace_path, "a");
     if (logfile == NULL) {
         perror("logfile");
         free(trace_path);
@@ -90,7 +94,8 @@ void StackFS_trace(const char *format, ...)
     int ret = 0;
 
     /*lock*/
-    pthread_spin_lock(&spinlock);
+    //printf("[debug] locking\n");
+    //pthread_spin_lock(&spinlock);
     if (logfile) {
         /*Banner : time + pid + tid*/
         ret = print_banner();
@@ -104,5 +109,6 @@ void StackFS_trace(const char *format, ...)
     }
 trace_out:
     /*unlock*/
-    pthread_spin_unlock(&spinlock);
+    //pthread_spin_unlock(&spinlock);
+    return;
 }
