@@ -489,6 +489,19 @@ static struct fuse_operations xmp_oper = {
 
 int main(int argc, char *argv[])
 {
+#ifdef JC_LOG
+    //init logfile
+    pthread_spin_init(&spinlock, 0);
+    log_open(".");
+    StackFS_trace("====================================");
+    StackFS_trace("hello, I'm JcFs and I am initing ...");
+#endif
 	umask(0);
-	return fuse_main(argc, argv, &xmp_oper, NULL);
+	int ret = fuse_main(argc, argv, &xmp_oper, NULL);
+#ifdef JC_LOG
+    StackFS_trace("hello, I'm JcFs and I am closing ...");
+    StackFS_trace("====================================");
+    log_close();
+#endif
+    return ret;
 }

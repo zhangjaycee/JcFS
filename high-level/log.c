@@ -14,7 +14,7 @@ pthread_spinlock_t spinlock;
 char banner[4096];
 
 #define TRACE_FILE_LEN 18
-#define TRACE_FILE "/trace_stackfs.log"
+#define TRACE_FILE "/JcFS.log"
 
 int64_t print_timer(void)
 {
