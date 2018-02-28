@@ -10,6 +10,14 @@ high-level JcFS is under developing now... I'm planning to add a small log/trace
 
 * LZ4 -- A very fast compression algorithm (https://github.com/lz4/lz4)
 
+
+### Current avaliable features:
+
+* Support log some important operations (e.g. init FS, close FS) to the logfile(`JcFS.log`).
+
+* Support sensitive words monitoring. When read or write some specified words, an alert will be write to the logfile.
+
+
 ### When implement some details(e.g. log system), I referenced to these projects:
 
 * sbu-fsl/fuse-stackfs (https://github.com/sbu-fsl/fuse-stackfs)

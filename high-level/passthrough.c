@@ -23,6 +23,7 @@
  */
 
 #define JC_LOG
+#define JC_ALERT
 
 #define FUSE_USE_VERSION 31
 
@@ -50,6 +51,11 @@
 
 #ifdef JC_LOG
 #include "log.h"
+#endif
+
+#ifdef JC_ALERT
+const char *sensitive_words[] = {"zjc", "ZJC", "jaycee", "Jaycee", "ZhangJaycee"};
+int sw_nr;
 #endif
 
 static void *xmp_init(struct fuse_conn_info *conn,
@@ -311,6 +317,9 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
+#ifdef JC_LOG
+    JcFS_log("reading from [%s] ...", path);
+#endif
 	int fd;
 	int res;
 
@@ -328,12 +337,31 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 
 	if(fi == NULL)
 		close(fd);
+#ifdef JC_ALERT
+    int i;
+    for (i = 0; i < sw_nr; i++) {
+        if (strstr(buf, sensitive_words[i])) {
+            JcFS_log("[ALERT] Someone trying to READ sensitive word: %s", sensitive_words[i]);
+        }
+    }
+#endif
 	return res;
 }
 
 static int xmp_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
 {
+#ifdef JC_LOG
+    JcFS_log("writing to [%s] ...", path);
+#endif
+#ifdef JC_ALERT
+    int i;
+    for (i = 0; i < sw_nr; i++) {
+        if (strstr(buf, sensitive_words[i])) {
+            JcFS_log("[ALERT] Someone trying to WRITE sensitive word: %s", sensitive_words[i]);
+        }
+    }
+#endif
 	int fd;
 	int res;
 
@@ -493,14 +521,22 @@ int main(int argc, char *argv[])
     //init logfile
     pthread_spin_init(&spinlock, 0);
     log_open(".");
-    StackFS_trace("====================================");
-    StackFS_trace("hello, I'm JcFs and I am initing ...");
+    JcFS_log("====================================");
+    JcFS_log("hello, I'm JcFs and I am initing ...");
+#endif
+#ifdef JC_ALERT
+    sw_nr = sizeof(sensitive_words) / sizeof(char *);
+    JcFS_log("[debug alert system] sw_nr = %d, sensitive words list:", sw_nr);
+    int i;
+    for (i = 0; i < sw_nr; i++) {
+        JcFS_log("%s", sensitive_words[i]);
+    }
 #endif
 	umask(0);
 	int ret = fuse_main(argc, argv, &xmp_oper, NULL);
 #ifdef JC_LOG
-    StackFS_trace("hello, I'm JcFs and I am closing ...");
-    StackFS_trace("====================================");
+    JcFS_log("hello, I'm JcFs and I am closing ...");
+    JcFS_log("====================================");
     log_close();
 #endif
     return ret;

@@ -13,4 +13,4 @@ int64_t print_timer(void);
 int print_banner(void);
 int log_open(char *statsDir_relative);
 void log_close(void);
-void StackFS_trace(const char *format, ...);
+void JcFS_log(const char *format, ...);

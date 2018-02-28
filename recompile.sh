@@ -1,7 +1,7 @@
 #!/bin/bash
 
-mkdir ~/mntpoint_jcfs
-fusermount3 -u ~/mntpoint_jcfs
+mkdir mnt
+fusermount3 -u mnt
 make clean
 make 
-./jcFs ~/mntpoint_jcfs
+./jcFs mnt

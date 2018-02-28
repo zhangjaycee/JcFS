@@ -9,7 +9,7 @@ int main(void)
     pthread_spin_init(&spinlock, 0);
     log_open(".");
     printf("log_test writing...\n");
-    StackFS_trace("hello, I'm testing the log system...");
+    JcFS_log("hello, I'm testing the log system...");
     log_close();
     printf("log_test end\n");
     return 0;

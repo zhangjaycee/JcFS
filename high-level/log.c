@@ -88,7 +88,7 @@ void log_close(void)
         fclose(logfile);
 }
 
-void StackFS_trace(const char *format, ...)
+void JcFS_log(const char *format, ...)
 {
     va_list ap;
     int ret = 0;

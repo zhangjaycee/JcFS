@@ -1,3 +1,4 @@
-JcFs
-JcFs_ll
-*.log
+jcFs
+jcFs_ll
+*log
+mnt/*
