@@ -2,7 +2,7 @@
 #define MAXSIZE 32  // MB
 #define MINSIZE 4096 // KB
 #define MAX_THREAD_NUM 32
-#define THREAD_NUM 2
+#define THREAD_NUM 8
 
 struct Arg {
     int fd;
@@ -14,6 +14,8 @@ struct Arg {
 struct IO_msg { // The queue node
     struct Arg args;
     struct IO_msg *next;
+    struct IO_msg *prev;
+    int num;
 };
 
 struct Arg_th {

@@ -23,7 +23,6 @@
  */
 
 //#define JC_LOG
-//#define JC_ALERT
 
 #define FUSE_USE_VERSION 31
 
@@ -53,69 +52,68 @@
 
 #include "log.h"
 
-#ifdef JC_ALERT
-const char *sensitive_words[] = {"zjc", "ZJC", "jaycee", "Jaycee", "ZhangJaycee"};
-int sw_nr;
-#endif
+
+
+/********* queue model
+
+		|  enqueue
+		V
+     |      |
+   9 | |||| |  <- head[0:4]
+   8 | |||| |
+   7 | |||| |
+   6 | |||| |
+   5 | |||| |
+   4 | |||| |  <- tail[0] tail[2]
+   3 |  | | |  <- tail[1]
+   2 |    | |  <- tail[3] 
+   1 |      |
+   0 |      |     (already finished requests)
+     |      |
+	 +      +
+
+queue_head_number and queue_head will only be modified by xmp_read
+queue_tail_number and queue_tail will only be modified by pool_func
+since number of pool_funcs is THREAD_NUM, wo dont need locks in pool_func
+***********/
 
 
 // variables for pthread
-//unsigned long long timer, timer_thread, throughput, throughput_thread;
-//char *pthread_buf;
-struct IO_msg *msg_queue[MAX_THREAD_NUM];
-pthread_cond_t queue_ready[MAX_THREAD_NUM];
-pthread_mutex_t queue_lock[MAX_THREAD_NUM];
-pthread_mutex_t con_lock;
 int th_n = THREAD_NUM;
-int global_counter = 0;
-int concurrency = 0;
-int th_counter[MAX_THREAD_NUM];
+struct IO_msg *queue_head[THREAD_NUM];
+struct IO_msg *queue_tail[THREAD_NUM];
+int queue_head_number[THREAD_NUM];
+int queue_tail_number[THREAD_NUM];
+pthread_cond_t queue_ready[THREAD_NUM];
+pthread_mutex_t queue_lock[THREAD_NUM];
 
 void *pool_func(void *void_arg)
 {
     struct Arg_th *arg_th = (struct Arg_th *)void_arg;
     int i = arg_th->index;
-    th_counter[i] = 0;
 	struct IO_msg *msg;
     int n;
     struct Arg *arg;
+    
     while(1) {
-		/*
-		JcFS_log("%d thread loop waiting...", i);
-        while (msg_queue[i] == NULL) {
-			JcFS_log("pointer addr of msg_queue[%d]: %p ", i, msg_queue[i]);
-			sleep(1);
-		}
-		JcFS_log("%d thread ready  ...", i);
-		*/
-        pthread_mutex_lock(&queue_lock[i]);
-        while (msg_queue[i] == NULL) {
-#ifdef JC_LOG
-			JcFS_log("%d thread waiting...", i);
-			JcFS_log("pointer addr of msg_queue[%d]: %p ", i, msg_queue[i]);
-#endif
-            pthread_cond_wait(&queue_ready[i], &queue_lock[i]);
-#ifdef JC_LOG
-			JcFS_log("%d thread ready  ...", i);
-#endif
-        }
-		msg = msg_queue[i];
-        msg_queue[i] = msg_queue[i]->next;
-        pthread_mutex_unlock(&queue_lock[i]);
-        arg = &(msg->args);
+        if (queue_head[i]->num > queue_tail[i]->num) {
+            msg = queue_tail[i]->prev;
+            arg = &(msg->args);
 #ifdef MMAP
-        memcpy(buf, file_buf + arg->offset, arg->size);
-        n = arg->size;
+            memcpy(buf, file_buf + arg->offset, arg->size);
+            n = arg->size;
 #else
-        n = pread(arg->fd, arg->buf, arg->size, arg->offset);
+            n = pread(arg->fd, arg->buf, arg->size, arg->offset);
 #endif
 #ifdef JC_LOG
-        if (n != arg->size)
-			JcFS_log("[DEBUG] read failed n = %d!\n", n);
+            if (n != arg->size)
+                JcFS_log("[DEBUG] read failed n = %d!\n", n);
 #endif
-        //pthread_mutex_lock(&queue_lock[i]);
-        th_counter[i]++;
-        //pthread_mutex_unlock(&queue_lock[i]);
+            queue_tail[i] = queue_tail[i]->prev;
+            free(queue_tail[i]->next);
+        } else {
+            usleep(1);
+        }
     }
 }
 
@@ -144,27 +142,24 @@ static void *xmp_init(struct fuse_conn_info *conn,
 
     //pthread create
     pthread_t tid[th_n];
+
     struct Arg_th **arg_th = (struct Arg_th **)malloc(sizeof(struct Arg_th *) * th_n);
 	int i;
     for (i = 0; i < th_n; i++) {
-        msg_queue[i] = NULL;
+        queue_head[i] = malloc(sizeof(struct IO_msg));
+        queue_head[i]->next = queue_head[i]->prev = NULL;
+        queue_head[i]->num = 0;
+        queue_tail[i] = queue_head[i];
         arg_th[i] = (struct Arg_th *)malloc(sizeof(struct Arg_th));
         arg_th[i]->index = i;
-        pthread_cond_init(&queue_ready[i], NULL);
         pthread_mutex_init(&queue_lock[i], NULL);
-		sleep(1);
         pthread_create(&tid[i], NULL, pool_func, arg_th[i]);
     }
-
-	pthread_mutex_init(&con_lock, NULL);
-
-
 	//pthread destory
 	/*
     for (i = 0; i < th_n; i++) {
         pthread_cancel(tid[i]);
     }
-    sleep(2);
 	*/
 #ifdef JC_LOG
     JcFS_log("XMP  inited ...");
@@ -412,13 +407,6 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
-	
-/*
-	pthread_mutex_lock(&con_lock);
-	concurrency++;
-    JcFS_log("concurrency: %d", concurrency);
-	pthread_mutex_unlock(&con_lock);
-*/
 #ifdef JC_LOG
     JcFS_log("reading from [%s] ...", path);
 #endif
@@ -443,54 +431,42 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	
 	// 2. pthread pread:
 	// init the messages
-	global_counter++; // need to check int bound!!
 	struct IO_msg **new_msg = (struct IO_msg **)malloc(sizeof(struct IO_msg *) * th_n);
-	int j, k;
-	for (j = 0; j < th_n; j++) {
-		new_msg[j] = (struct IO_msg *)malloc(sizeof(struct IO_msg));
-		new_msg[j]->args.fd = fd;
-		new_msg[j]->args.buf = buf + size/th_n * j;
-		new_msg[j]->args.size = size/th_n;
-		new_msg[j]->args.offset = offset + size/th_n * j;
-#ifdef JC_LOG
-		if (new_msg[j] == NULL)
-			JcFS_log("[read prepare] new_msg[%d] == NULL", j);
-#endif
+	//struct IO_msg *tmp_p;
+    int my_head_number[th_n];
+	int i;
+	for (i = 0; i < th_n; i++) {
+		new_msg[i] = (struct IO_msg *)malloc(sizeof(struct IO_msg));
+		new_msg[i]->args.fd = fd;
+		new_msg[i]->args.buf = buf + size/th_n * i;
+		new_msg[i]->args.size = size/th_n;
+		new_msg[i]->args.offset = offset + size/th_n * i;
+        // enqueue
+		pthread_mutex_lock(&queue_lock[i]);
+		new_msg[i]->num = queue_head[i]->num + 1;
+        my_head_number[i] = queue_head[i]->num + 1;
+		new_msg[i]->next = queue_head[i];
+        queue_head[i]->prev = new_msg[i];
+        queue_head[i] = new_msg[i];
+		pthread_mutex_unlock(&queue_lock[i]);
 	}
-	// add to queue and notify threads
-	for (k = 0; k < th_n; k++) {
-		pthread_mutex_lock(&queue_lock[k]);
-		new_msg[k]->next = msg_queue[k];
-		msg_queue[k] = new_msg[k];
-#ifdef JC_LOG
-		if (msg_queue[k] == NULL)
-			JcFS_log("[read prepare] msg_queue[%d] == NULL", k);
-		else
-			JcFS_log("[read prepare] pointer addr of msg_queue[%d]: %p ", k, msg_queue[k]);
-#endif
-		pthread_mutex_unlock(&queue_lock[k]);
-		while (pthread_cond_signal(&queue_ready[k])) {
-			continue;
-		}
-	}	
 	// waiting until all threads completed
 	while (1) {
-		int equal_flag = 1;
-		for (k = 0; k < th_n; k++) pthread_mutex_lock(&queue_lock[k]);
-		for (k = 0; k < th_n; k++) {
-			if (th_counter[k] != global_counter)
-				equal_flag = 0;
+        int ok_flag = 1;
+		for (i = 0; i < th_n; i++) {
+            if (queue_tail[i]->num < my_head_number[i]) {
+                usleep(1);
+                ok_flag = 0;
+                break;
+            }
 		}
-		for (k = 0; k < th_n; k++) pthread_mutex_unlock(&queue_lock[k]);
-		if (equal_flag) {
-//#ifdef JC_LOG
-			JcFS_log("[threads sync] succeed! %d", global_counter);
-//#endif
+		if (ok_flag) {
+#ifdef JC_LOG
+			JcFS_log("[threads sync] succeed! %d", my_head_number[i]);
+#endif
 			res = size;
 			break;
-		} else {
-			continue;
-		}
+        }
 	}
 
 	if (res == -1)
@@ -498,19 +474,6 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 
 	if(fi == NULL)
 		close(fd);
-#ifdef JC_ALERT
-    int i;
-    for (i = 0; i < sw_nr; i++) {
-        if (strstr(buf, sensitive_words[i])) {
-            JcFS_log("[ALERT] Someone trying to READ sensitive word: %s", sensitive_words[i]);
-        }
-    }
-#endif
-/*
-	pthread_mutex_lock(&con_lock);
-	concurrency--;
-	pthread_mutex_unlock(&con_lock);
-*/
 	return res;
 }
 
@@ -519,14 +482,6 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 {
 #ifdef JC_LOG
     JcFS_log("writing to [%s] ...", path);
-#endif
-#ifdef JC_ALERT
-    int i;
-    for (i = 0; i < sw_nr; i++) {
-        if (strstr(buf, sensitive_words[i])) {
-            JcFS_log("[ALERT] Someone trying to WRITE sensitive word: %s", sensitive_words[i]);
-        }
-    }
 #endif
 	int fd;
 	int res;
@@ -690,14 +645,6 @@ int main(int argc, char *argv[])
     JcFS_log("====================================");
     JcFS_log("hello, I'm JcFs and I am initing ...");
 //#endif
-#ifdef JC_ALERT
-    sw_nr = sizeof(sensitive_words) / sizeof(char *);
-    JcFS_log("[debug alert system] sw_nr = %d, sensitive words list:", sw_nr);
-    int i;
-    for (i = 0; i < sw_nr; i++) {
-        JcFS_log("%s", sensitive_words[i]);
-    }
-#endif
 	umask(0);
 	int ret = fuse_main(argc, argv, &xmp_oper, NULL);
 
@@ -708,4 +655,3 @@ int main(int argc, char *argv[])
 //#endif
 	return ret;
 }
-
