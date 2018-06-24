@@ -23,6 +23,8 @@
  */
 
 //#define JC_LOG
+//#define PREAD
+#define ADAPTIVE
 
 #define FUSE_USE_VERSION 31
 
@@ -51,6 +53,7 @@
 #include "passthrough_pthread.h"
 
 #include "log.h"
+
 
 
 
@@ -112,7 +115,7 @@ void *pool_func(void *void_arg)
             queue_tail[i] = queue_tail[i]->prev;
             free(queue_tail[i]->next);
         } else {
-            usleep(1);
+            //usleep(1);
         }
     }
 }
@@ -136,6 +139,10 @@ static void *xmp_init(struct fuse_conn_info *conn,
 	cfg->attr_timeout = 0;
 	cfg->negative_timeout = 0;
 
+    // NOTE: here is a bug, using direct_io can only test the performance by fio now
+    // but it will cause infinte loop read bug ,(by jc
+    // ture it to 0 and the FS can work correctly
+    cfg->direct_io = 1;
 #ifdef JC_LOG
     JcFS_log("XMP  initing ...");
 #endif
@@ -425,49 +432,60 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	if (fd == -1)
 		return -errno;
 
-	
 	// 1. directly passthrough:
-	//res = pread(fd, buf, size, offset);
-	
-	// 2. pthread pread:
-	// init the messages
-	struct IO_msg **new_msg = (struct IO_msg **)malloc(sizeof(struct IO_msg *) * th_n);
-	//struct IO_msg *tmp_p;
-    int my_head_number[th_n];
-	int i;
-	for (i = 0; i < th_n; i++) {
-		new_msg[i] = (struct IO_msg *)malloc(sizeof(struct IO_msg));
-		new_msg[i]->args.fd = fd;
-		new_msg[i]->args.buf = buf + size/th_n * i;
-		new_msg[i]->args.size = size/th_n;
-		new_msg[i]->args.offset = offset + size/th_n * i;
-        // enqueue
-		pthread_mutex_lock(&queue_lock[i]);
-		new_msg[i]->num = queue_head[i]->num + 1;
-        my_head_number[i] = queue_head[i]->num + 1;
-		new_msg[i]->next = queue_head[i];
-        queue_head[i]->prev = new_msg[i];
-        queue_head[i] = new_msg[i];
-		pthread_mutex_unlock(&queue_lock[i]);
-	}
-	// waiting until all threads completed
-	while (1) {
-        int ok_flag = 1;
-		for (i = 0; i < th_n; i++) {
-            if (queue_tail[i]->num < my_head_number[i]) {
-                usleep(1);
-                ok_flag = 0;
+    //if (size <= 4096 * 4096) {
+#ifdef PREAD
+	res = pread(fd, buf, size, offset);
+#else
+#ifdef ADAPTIVE
+    if (size < 4096 * th_n) {
+        res = pread(fd, buf, size, offset);
+    } else {
+#endif
+        // 2. pthread pread:
+        // init the messages
+        struct IO_msg **new_msg = (struct IO_msg **)malloc(sizeof(struct IO_msg *) * th_n);
+        //struct IO_msg *tmp_p;
+        int my_head_number[th_n];
+        int i;
+        for (i = 0; i < th_n; i++) {
+            new_msg[i] = (struct IO_msg *)malloc(sizeof(struct IO_msg));
+            new_msg[i]->args.fd = fd;
+            new_msg[i]->args.buf = buf + size/th_n * i;
+            new_msg[i]->args.size = size/th_n;
+            new_msg[i]->args.offset = offset + size/th_n * i;
+            // enqueue
+            pthread_mutex_lock(&queue_lock[i]);
+            new_msg[i]->num = queue_head[i]->num + 1;
+            my_head_number[i] = queue_head[i]->num + 1;
+            new_msg[i]->next = queue_head[i];
+            queue_head[i]->prev = new_msg[i];
+            queue_head[i] = new_msg[i];
+            pthread_mutex_unlock(&queue_lock[i]);
+        }
+        // waiting until all threads completed
+        while (1) {
+            int ok_flag = 1;
+            for (i = 0; i < th_n; i++) {
+                if (queue_tail[i]->num < my_head_number[i]) {
+                    //usleep(1);
+                    ok_flag = 0;
+                    break;
+                }
+            }
+            if (ok_flag) {
+#ifdef JC_LOG
+                JcFS_log("[threads sync] succeed! %d", my_head_number[i]);
+#endif
+                res = size;
                 break;
             }
-		}
-		if (ok_flag) {
-#ifdef JC_LOG
-			JcFS_log("[threads sync] succeed! %d", my_head_number[i]);
-#endif
-			res = size;
-			break;
         }
-	}
+#ifdef ADAPTIVE
+    }
+#endif
+    
+#endif
 
 	if (res == -1)
 		res = -errno;

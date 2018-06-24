@@ -18,7 +18,7 @@ CFLAGS = -I${INC_PATH} `pkg-config fuse3 --cflags --libs` -Wall -lpthread
 all: jcFs jcFs_pthread jcFs_ll
 	
 jcFs:
-	#PKG_CONFIG_PATH="/usr/local/lib64/pkgconfig"
+	#export PKG_CONFIG_PATH="/usr/local/lib64/pkgconfig"
 	$(CC) $(SRC) $(CFLAGS) -o $(TARGET)
 	#gcc -Wall -g  passthrough_ll.c lz4.c `pkg-config fuse3 --cflags --libs` -std=c99 -o jcFs_ll 
 	#gcc -Wall -g  passthrough_fh.c lz4.c `pkg-config fuse3 --cflags --libs` -std=c99 -o jcFs

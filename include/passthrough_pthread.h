@@ -2,7 +2,7 @@
 #define MAXSIZE 32  // MB
 #define MINSIZE 4096 // KB
 #define MAX_THREAD_NUM 32
-#define THREAD_NUM 8
+#define THREAD_NUM 4
 
 struct Arg {
     int fd;
